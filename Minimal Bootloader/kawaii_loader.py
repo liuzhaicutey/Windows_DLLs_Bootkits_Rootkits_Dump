@@ -65,7 +65,7 @@ def sign():
     if not os.path.exists(bl):
         raise FileNotFoundError(f"{BOOT} missing")
     pfx = os.path.join(DIR, "kawaii_cert.pfx")
-    pwd = "password"
+    pwd = "<add_your_own_password>" #add your password here
     run_cmd([st, "sign", "/fd", "SHA256", "/f", pfx, "/p", pwd, bl])
 
 def mount():
