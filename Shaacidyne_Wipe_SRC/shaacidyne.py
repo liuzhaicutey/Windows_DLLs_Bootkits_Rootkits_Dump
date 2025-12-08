@@ -243,45 +243,75 @@ def uefi_boot():
         if not os.path.exists(dest_path) or os.path.getsize(dest_path) == 0:
             raise Exception(f"Copy failed. Destination file '{dest_path}' not found or is empty.")
         
+
         bcd_path = os.path.join(UEFI_EFI_PATH, dest_name).replace("/", "\\")
         
         boot_configured = False
+        created_guid = None
         
 
         try:
-            run_cmd(["bcdedit", "/set", "{fwbootmgr}", "displayorder", bcd_path, "/addfirst"])
-            log_print(f"Set {bcd_path} as FIRST in firmware boot display order (permanent)")
-            boot_configured = True
-        except Exception as e:
-            log_print(f"Could not add to firmware display order: {e}")
-        
 
-        if not boot_configured:
-            try:
-                run_cmd(["bcdedit", "/set", "{fwbootmgr}", "bootsequence", bcd_path])
-                log_print(f"Set {bcd_path} using bootsequence (will boot once, may need BIOS config for permanent)")
+            out = run_cmd(["bcdedit", "/create", "/d", UEFI_BOOT_NAME, "/application", "bootapp"])
+            
+
+            patterns = [
+                r'\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}',
+                r'\{[0-9a-fA-F-]{36}\}',
+            ]
+            
+            for pattern in patterns:
+                m = re.search(pattern, out)
+                if m:
+                    created_guid = m.group(0)
+                    break
+            
+            if created_guid:
+
+                run_cmd(["bcdedit", "/set", created_guid, "device", f"partition={d}"])
+                run_cmd(["bcdedit", "/set", created_guid, "path", bcd_path])
+                
+                run_cmd(["bcdedit", "/set", "{fwbootmgr}", "displayorder", created_guid, "/addfirst"])
+                log_print(f"Created boot entry {created_guid} and set as FIRST in boot order (permanent)")
+                
+
+                run_cmd(["bcdedit", "/default", created_guid])
+                log_print(f"Set {created_guid} as default boot entry")
+                
                 boot_configured = True
-            except Exception as e:
-                log_print(f"Could not set bootsequence: {e}")
+            else:
+                raise Exception("Could not extract GUID from bcdedit output")
+                
+        except Exception as e:
+            log_print(f"Method 1 failed (bootapp entry): {e}")
         
-
+        try:
+            run_cmd(["bcdedit", "/timeout", "0"])
+            log_print("Set boot timeout to 0 (instant boot, no delay)")
+        except Exception as e:
+            log_print(f"Could not set boot timeout to 0: {e}")
+        
         try:
             run_cmd(["bcdedit", "/set", "{fwbootmgr}", "timeout", "0"])
-            log_print("Set firmware boot timeout to 0 (instant boot, no delay)")
+            log_print("Set firmware boot manager timeout to 0")
         except Exception as e:
-            log_print(f"Could not set firmware timeout to 0: {e}")
+            log_print(f"Note: Could not set fwbootmgr timeout: {e}")
         
         if boot_configured:
             messagebox_msg = messagebox_msg.replace("To boot: Restart and access your BIOS/UEFI boot menu (usually F12, F8, or ESC) and select 'Shaacidyne' or 'UEFI Boot'.", 
-                                                   "Your bootloader will launch INSTANTLY on restart with NO timeout or menu delay. It is now the permanent default boot option.")
+                                                   "Your bootloader will launch INSTANTLY on restart with NO timeout. It is now the permanent default boot option.")
         else:
-            log_print("WARNING: Could not automatically set boot order. User will need to:")
+            log_print("WARNING: Could not automatically configure boot order.")
+            log_print("The bootloader is installed but you need to:")
             log_print("1. Enter BIOS/UEFI settings (usually DEL or F2 at startup)")
             log_print("2. Change boot priority to boot from the EFI file first")
-            log_print("3. Disable any boot menu timeout in BIOS for instant boot")
+            log_print("3. Disable boot menu timeout in BIOS for instant boot")
+            messagebox_msg += "\n\nNOTE: Automatic boot configuration failed. You must manually set boot priority in BIOS/UEFI settings."
         
         log_print(f"Bootloader installed to: {dest_path}")
-        log_print(f"Configuration: Permanent default boot with instant launch (no timeout)")
+        if boot_configured:
+            log_print(f"Boot entry GUID: {created_guid}")
+            log_print(f"Configuration: Permanent default boot with instant launch (timeout = 0)")
         
         try:
             root = Tk()
