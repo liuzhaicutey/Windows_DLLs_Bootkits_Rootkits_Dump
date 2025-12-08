@@ -20,7 +20,8 @@ if getattr(sys, 'frozen', False):
     sys.stdout = open('CONOUT$', 'w')
     sys.stderr = open('CONOUT$', 'w')
 
-DRV = "S"
+
+DRV = "S" 
 
 UEFI_BOOT_BINARY = "BOOTX64.efi"
 UEFI_EFI_PATH = r"\EFI\BOOT"
@@ -125,13 +126,14 @@ def mount_partition(is_uefi):
 
     tmp = os.path.join(DIR, 'tmp_list.txt')
     vol = None
-    
+
     try:
-        with open(tmp, 'w') as f: 
+        with open(tmp, 'w') as f:  
             f.write("list volume\n")
+            f.write("exit\n") 
         out = run_cmd(["diskpart", "/s", tmp])
     finally:
-        if os.path.exists(tmp): 
+        if os.path.exists(tmp):  
             os.remove(tmp)
 
     for line in out.splitlines():
@@ -144,55 +146,101 @@ def mount_partition(is_uefi):
     if not vol:
         raise Exception(target_error)
     
+
     tmp_mount = os.path.join(DIR, 'tmp_mount.txt')
-    content = f"select volume {vol}\nassign letter={DRV}\nexit\n"
+
+    content = f"select volume {vol}\nassign\nexit\n" 
+    
+    assigned_drive_letter = None
     
     try:
-        with open(tmp_mount, 'w') as f: 
+        with open(tmp_mount, 'w') as f:  
             f.write(content)
-        run_cmd(["diskpart", "/s", tmp_mount])
+
+        run_cmd(["diskpart", "/s", tmp_mount]) 
+        
+
+        with open(tmp, 'w') as f:  
+            f.write("list volume\n")
+            f.write("exit\n")
+        out_list = run_cmd(["diskpart", "/s", tmp])
+        
+
+        for line in out_list.splitlines():
+
+            pattern = rf"^\s*Volume\s*{re.escape(vol)}\s+([A-Z])\s+"
+
+            m = re.search(pattern, line)
+            
+            if m:
+
+                assigned_drive_letter = m.group(1) 
+                break
+
+        if not assigned_drive_letter:
+
+            log_print(f"DEBUG: Failed to parse drive letter for Volume {vol}. DiskPart output:\n{out_list}")
+            raise Exception("DiskPart assigned a letter but could not detect which one.")
+        
     finally:
-        if os.path.exists(tmp_mount): 
+        if os.path.exists(tmp_mount):  
             os.remove(tmp_mount)
+        if os.path.exists(tmp):
+            os.remove(tmp)
             
     time.sleep(2)
-    drive_path = f"{DRV}:\\"
+
+    drive_path = f"{assigned_drive_letter}:\\" 
     if not os.path.isdir(drive_path):
-        raise Exception(f"Failed to mount partition as {DRV}:. Check if the letter {DRV} is already in use.")
+        raise Exception(f"Failed to mount partition as {assigned_drive_letter}:. Check if the drive is not accessible.")
 
     return drive_path
 
 
 def umount(d):
+
     tmp = os.path.join(DIR, 'tmp_umount.txt')
     list_vol = os.path.join(DIR, 'list_vol.txt')
+    
+
+    drive_letter = d.strip(':').strip('\\')
     
     try:
         with open(list_vol, 'w') as f:
             f.write("list volume\n")
+            f.write("exit\n")
         
         out = run_cmd(["diskpart", "/s", list_vol])
         vol = None
         
+
         for line in out.splitlines():
-            if d.strip(':') in line:
-                m = re.search(r'Volume\s+(\d+)', line)
-                if m:
-                    vol = m.group(1)
+
+            pattern = rf"^\s*Volume\s*\d*\s*{re.escape(drive_letter)}\s+"
+
+            m = re.search(pattern, line)
+
+            if m:
+
+                m_vol = re.search(r'Volume\s+(\d+)', line)
+                if m_vol:
+                    vol = m_vol.group(1)
                     break
+
             
         if vol:
-            content = f"select volume {vol}\nremove letter={d.strip(':')}\nexit\n"
-            with open(tmp, 'w') as f: 
+
+            content = f"select volume {vol}\nremove letter={drive_letter}\nexit\n" 
+            with open(tmp, 'w') as f:  
                 f.write(content)
             run_cmd(["diskpart", "/s", tmp])
         else:
-            pass
+            log_print(f"Warning: Volume for letter {drive_letter} was not found for unmounting.")
             
     except Exception as e:
         log_print(f"Warning: Failed to unmount drive {d}. Manual removal might be necessary. Error: {e}")
     finally:
-        if os.path.exists(tmp): 
+        if os.path.exists(tmp):  
             os.remove(tmp)
         if os.path.exists(list_vol):
             os.remove(list_vol)
@@ -218,11 +266,77 @@ def check_secure_boot_status():
         return False
 
 
+def get_esp_location():
+
+    log_print("Attempting to determine Disk and Partition number for the ESP.")
+    
+
+    tmp_disk_list = os.path.join(DIR, 'tmp_disk_list.txt')
+    disk_num = None
+
+    try:
+
+        with open(tmp_disk_list, 'w') as f:
+            f.write("list disk\n")
+            f.write("exit\n") 
+        
+        out_disk = run_cmd(["diskpart", "/s", tmp_disk_list])
+        log_print("DiskPart list disk output retrieved successfully.")
+        
+
+        for line in out_disk.splitlines():
+
+            if "GPT" in line:
+                m = re.search(r'Disk\s+(\d+)', line)
+                if m:
+                    disk_num = m.group(1)
+                    log_print(f"Detected GPT Disk: {disk_num}")
+                    break
+        
+        if not disk_num:
+
+             disk_num = "0" 
+
+    except Exception as e:
+        log_print(f"ERROR: Failed to run DiskPart 'list disk' command. Error: {e}")
+        raise
+    finally:
+        if os.path.exists(tmp_disk_list): 
+            os.remove(tmp_disk_list)
+            
+
+    tmp_part = os.path.join(DIR, 'tmp_part.txt')
+    part_num = None
+    
+    try:
+
+        with open(tmp_part, 'w') as f:
+            f.write(f"select disk {disk_num}\n")
+            f.write("list partition\n")
+            f.write("exit\n")
+        
+        out_part = run_cmd(["diskpart", "/s", tmp_part])
+    finally:
+        if os.path.exists(tmp_part): 
+            os.remove(tmp_part)
+            
+
+    for line in out_part.splitlines():
+        if "System" in line and re.search(r'Partition\s+(\d+)', line, re.IGNORECASE):
+            m = re.search(r'Partition\s+(\d+)', line, re.IGNORECASE)
+            if m:
+                part_num = m.group(1)
+                log_print(f"Found ESP on Disk {disk_num}, Partition {part_num}.")
+                return disk_num, part_num
+    
+    raise Exception("Could not reliably find the Disk and Partition number for the EFI System Partition.")
+
+
 def uefi_boot():
     secure_boot_on = check_secure_boot_status()
     
-    dest_name = UEFI_BOOT_BINARY 
-    bl_src = os.path.join(DIR, UEFI_BOOT_BINARY) 
+    dest_name = UEFI_BOOT_BINARY    
+    bl_src = os.path.join(DIR, UEFI_BOOT_BINARY)    
 
     if secure_boot_on:
         messagebox_msg = f"UEFI Bootloader '{UEFI_BOOT_NAME}' installed successfully!\n\n!! WARNING: SECURE BOOT IS ON !!\n(Installed unsigned binary. Booting may fail unless Secure Boot is OFF or custom keys are enrolled.)\n\nTo boot: Restart and access your BIOS/UEFI boot menu (usually F12, F8, or ESC) and select '{UEFI_BOOT_NAME}' or 'UEFI Boot'."
@@ -231,8 +345,16 @@ def uefi_boot():
 
     d = None
     try:
-        d = mount_partition(True)
         
+        d = mount_partition(True)
+
+        disk_num = part_num = None
+        try:
+            disk_num, part_num = get_esp_location() 
+            log_print(f"ESP physical location: disk {disk_num}, partition {part_num}")
+        except Exception as e:
+            log_print(f"Could not determine physical disk/partition: {e}")
+
         base_dir = os.path.join(d, UEFI_EFI_PATH.strip('\\'))
         dest_path = os.path.join(base_dir, dest_name)
         
@@ -245,14 +367,24 @@ def uefi_boot():
         
 
         bcd_path = os.path.join(UEFI_EFI_PATH, dest_name).replace("/", "\\")
+        if not bcd_path.startswith("\\"):
+            bcd_path = "\\" + bcd_path.lstrip("\\")
         
         boot_configured = False
         created_guid = None
-        
+
+
+        drive, _ = os.path.splitdrive(d)
+        if not drive:
+            raise Exception(f"Could not determine mounted drive letter from '{d}'")
+        partition_device = f"partition={drive}" 
+        log_print(f"Using device string for bcdedit/device: {partition_device}")
+        log_print(f"Using bcd path: {bcd_path}")
 
         try:
 
             out = run_cmd(["bcdedit", "/create", "/d", UEFI_BOOT_NAME, "/application", "bootapp"])
+            log_print(f"bcdedit /create output: {out.strip()}")
             
 
             patterns = [
@@ -268,23 +400,48 @@ def uefi_boot():
             
             if created_guid:
 
-                run_cmd(["bcdedit", "/set", created_guid, "device", f"partition={d}"])
-                run_cmd(["bcdedit", "/set", created_guid, "path", bcd_path])
-                
-                run_cmd(["bcdedit", "/set", "{fwbootmgr}", "displayorder", created_guid, "/addfirst"])
-                log_print(f"Created boot entry {created_guid} and set as FIRST in boot order (permanent)")
+                created_guid = created_guid.strip()
+                if not (created_guid.startswith("{") and created_guid.endswith("}")):
+                    created_guid = "{" + created_guid.strip("{}") + "}"
                 
 
-                run_cmd(["bcdedit", "/default", created_guid])
-                log_print(f"Set {created_guid} as default boot entry")
+                try:
+                    out1 = run_cmd(["bcdedit", "/set", created_guid, "device", partition_device])
+                    log_print(f"bcdedit set device output: {out1.strip()}")
+                except Exception as e:
+                    log_print(f"Failed to set device using '{partition_device}': {e}")
+
+                    if disk_num is not None and part_num is not None:
+                        phys_device = f"disk={disk_num} partition={part_num}"
+                        out_fallback = run_cmd(["bcdedit", "/set", created_guid, "device", phys_device])
+                        log_print(f"bcdedit set device (fallback) output: {out_fallback.strip()}")
+                    else:
+                        raise
                 
+                out2 = run_cmd(["bcdedit", "/set", created_guid, "path", bcd_path])
+                log_print(f"bcdedit set path output: {out2.strip()}")
+                
+
+                try:
+                    out3 = run_cmd(["bcdedit", "/set", "{fwbootmgr}", "displayorder", created_guid, "/addfirst"])
+                    log_print(f"bcdedit set fwbootmgr displayorder output: {out3.strip()}")
+                except Exception as e:
+                    log_print(f"Warning: Could not add entry to fwbootmgr displayorder: {e}")
+                
+                try:
+                    out4 = run_cmd(["bcdedit", "/default", created_guid])
+                    log_print(f"bcdedit default output: {out4.strip()}")
+                except Exception as e:
+                    log_print(f"Warning: Could not set default to the new entry: {e}")
+
                 boot_configured = True
             else:
-                raise Exception("Could not extract GUID from bcdedit output")
-                
+                log_print(f"Could not extract GUID from bcdedit create output. Continuing to ensure boot via {bootmgr}.")
+            
         except Exception as e:
-            log_print(f"Method 1 failed (bootapp entry): {e}")
-        
+            log_print(f"Method 1 (create bootapp entry) had an error: {e}")
+
+
         try:
             run_cmd(["bcdedit", "/timeout", "0"])
             log_print("Set boot timeout to 0 (instant boot, no delay)")
@@ -296,23 +453,51 @@ def uefi_boot():
             log_print("Set firmware boot manager timeout to 0")
         except Exception as e:
             log_print(f"Note: Could not set fwbootmgr timeout: {e}")
-        
-        if boot_configured:
-            messagebox_msg = messagebox_msg.replace("To boot: Restart and access your BIOS/UEFI boot menu (usually F12, F8, or ESC) and select 'Shaacidyne' or 'UEFI Boot'.", 
-                                                   "Your bootloader will launch INSTANTLY on restart with NO timeout. It is now the permanent default boot option.")
+
+
+        try:
+            bootmgr_enum = run_cmd(["bcdedit", "/enum", "{bootmgr}"])
+            log_print(f"Current {{bootmgr}} settings:\n{bootmgr_enum.strip()}")
+
+            with open(LOG_FILE, 'a', encoding='utf-8') as f:
+                f.write("\n--- BOOTMGR BACKUP ---\n")
+                f.write(bootmgr_enum + "\n")
+        except Exception as e:
+            log_print(f"Warning: Could not read original {{bootmgr}} settings: {e}")
+
+        forced_bootmgr_ok = False
+        try:
+
+            out_bdev = run_cmd(["bcdedit", "/set", "{bootmgr}", "device", partition_device])
+            log_print(f"bcdedit set {{bootmgr}} device output: {out_bdev.strip()}")
+
+            out_bpath = run_cmd(["bcdedit", "/set", "{bootmgr}", "path", bcd_path])
+            log_print(f"bcdedit set {{bootmgr}} path output: {out_bpath.strip()}")
+            forced_bootmgr_ok = True
+            log_print("Successfully pointed {bootmgr} at the custom EFI binary.")
+
+        except Exception as e:
+            log_print(f"Failed to force {bootmgr} to our binary: {e}")
+            forced_bootmgr_ok = False
+
+        if boot_configured or forced_bootmgr_ok:
+            messagebox_msg = messagebox_msg.replace(
+                "To boot: Restart and access your BIOS/UEFI boot menu (usually F12, F8, or ESC) and select 'Shaacidyne' or 'UEFI Boot'.",
+                "Your bootloader will launch INSTANTLY on restart with NO timeout (Windows Boot Manager now points to it)."
+            )
         else:
-            log_print("WARNING: Could not automatically configure boot order.")
-            log_print("The bootloader is installed but you need to:")
-            log_print("1. Enter BIOS/UEFI settings (usually DEL or F2 at startup)")
-            log_print("2. Change boot priority to boot from the EFI file first")
-            log_print("3. Disable boot menu timeout in BIOS for instant boot")
+            log_print("WARNING: Could not automatically configure boot order or override Windows Boot Manager.")
+            log_print("You may need to manually set the firmware boot priority or restore {bootmgr} manually.")
             messagebox_msg += "\n\nNOTE: Automatic boot configuration failed. You must manually set boot priority in BIOS/UEFI settings."
-        
+
         log_print(f"Bootloader installed to: {dest_path}")
         if boot_configured:
             log_print(f"Boot entry GUID: {created_guid}")
-            log_print(f"Configuration: Permanent default boot with instant launch (timeout = 0)")
-        
+            log_print(f"Configuration: Created BCD boot entry and attempted to set fwbootmgr displayorder")
+        if forced_bootmgr_ok:
+            log_print("Configuration: {bootmgr} device/path pointed to the installed EFI file (forced).")
+            log_print("If you wish to restore the previous Windows Boot Manager behavior, check the installer_log.txt for the backed up {bootmgr} output and run appropriate bcdedit commands to restore device/path.")
+
         try:
             root = Tk()
             root.withdraw()
@@ -334,7 +519,7 @@ def uefi_boot():
             pass
         raise
     finally:
-        if d:  
+        if d:
             umount(d)
 
 
@@ -376,7 +561,7 @@ def legacy_boot():
             pass
         raise
     finally:
-        if d: 
+        if d:  
             umount(d)
 
 
