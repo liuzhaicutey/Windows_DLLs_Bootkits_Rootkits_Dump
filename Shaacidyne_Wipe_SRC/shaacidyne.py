@@ -9,11 +9,6 @@ import struct
 import traceback
 from tkinter import messagebox, Tk
 
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.backends import default_backend
-import cryptography.hazmat.primitives.serialization.pkcs12
-
 if getattr(sys, 'frozen', False):
     DIR = os.path.dirname(sys.executable)
 else:
@@ -27,22 +22,9 @@ if getattr(sys, 'frozen', False):
 
 DRV = "S"
 
-UEFI_BOOT_BINARY = "bootloader.efi"
-UEFI_SECURE_IMAGE_NAME = "bootloader_secure.efi"
+UEFI_BOOT_BINARY = "BOOTX64.efi"
 UEFI_EFI_PATH = r"\EFI\BOOT"
 UEFI_BOOT_NAME = "Shaacidyne"
-UEFI_CERT_NAME = "shaacidyne"
-UEFI_CERT_FILE = os.path.join(DIR, "shaacidyne.cer")
-UEFI_TEMP_PS1 = os.path.join(DIR, "temp_cert.ps1")
-UEFI_TEMP_PFX = os.path.join(DIR, "temp_export.pfx")
-UEFI_PFX_PASSWORD = "<your_password>"
-
-UEFI_HEADER_MAGIC = 0xDEADBEEF
-UEFI_BOOTLOADER_VERSION = 0x0100
-UEFI_PUBLIC_KEY_INDEX = 0x01
-UEFI_DEVICE_ID = 0x12345678
-UEFI_RSA_KEY_SIZE = 2048
-UEFI_SIGNATURE_SIZE = UEFI_RSA_KEY_SIZE // 8
 
 BIOS_BOOT_BINARY = "bootloader.bin"
 BIOS_DEST_BOOT_NAME = "bootmgr"
@@ -222,7 +204,7 @@ def check_secure_boot_status():
         
     try:
         key_path = r"SYSTEM\CurrentControlSet\Control\SecureBoot\State"
-        out = run_cmd(["reg", "query", f"HKEY_LOCAL_MACHINE\\{key_path}", "/v", "UEFIHw"])
+        out = run_cmd(["reg", "query", f"HKEY_LOCAL_MACHINE\\{key_path}", "/v", "UEFISecureBootEnabled"])
         
         if "0x1" in out:
             return True
@@ -236,109 +218,16 @@ def check_secure_boot_status():
         return False
 
 
-def uefi_cert():
-    
-    script = f"""
-$ErrorActionPreference='Stop'
-
-Get-ChildItem -Path Cert:\\CurrentUser\\My | Where-Object {{$_.Subject -like "CN={UEFI_CERT_NAME}"}} | Remove-Item -Force
-if (Test-Path "{UEFI_TEMP_PFX}") {{ Remove-Item "{UEFI_TEMP_PFX}" -Force }}
-
-$cert = New-SelfSignedCertificate -DnsName "{UEFI_CERT_NAME}" -CertStoreLocation "Cert:\\CurrentUser\\My" -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(5) -Type CodeSigning -HashAlgorithm SHA256
-
-$p = "{UEFI_CERT_FILE}"
-Export-Certificate -Cert $cert -FilePath $p -Force -Type CERT
-
-if (Test-Path $p) {{
-    Import-Certificate -FilePath $p -CertStoreLocation "Cert:\\LocalMachine\\Root"
-}} else {{
-    throw "Certificate file not found after export."
-}}
-
-$cert | Export-PfxCertificate -FilePath "{UEFI_TEMP_PFX}" -Password (ConvertTo-SecureString -String "{UEFI_PFX_PASSWORD}" -Force -AsPlainText)
-"""
-    try:
-        with open(UEFI_TEMP_PS1, "w", encoding="utf-8") as f:
-            f.write(script)
-            
-        run_cmd(f"powershell -ExecutionPolicy Bypass -File \"{UEFI_TEMP_PS1}\"", shell=True)
-        
-    except Exception as e:
-        log_print(f"Certificate management failed: {e}")
-        raise
-    finally:
-        if os.path.exists(UEFI_TEMP_PS1):
-            os.remove(UEFI_TEMP_PS1)
-
-
-def uefi_load_private_key_from_pfx(pfx_path, password):
-    with open(pfx_path, "rb") as f:
-        pfx_data = f.read()
-
-    private_key, _, _ = serialization.pkcs12.load_key_and_certificates(
-        pfx_data,
-        password.encode('utf-8'),
-        default_backend()
-    )
-    return private_key
-
-
-def uefi_custom_sign(private_key):
-    bl_src = os.path.join(DIR, UEFI_BOOT_BINARY) 
-    secure_img_path = os.path.join(DIR, UEFI_SECURE_IMAGE_NAME)
-    
-    if not os.path.exists(bl_src):
-        raise FileNotFoundError(f"Input binary file '{bl_src}' missing. Cannot sign.")
-
-    try:
-        with open(bl_src, 'rb') as f:
-            raw_binary_data = f.read()
-            
-        binary_size = len(raw_binary_data)
-
-        signature = private_key.sign(
-            raw_binary_data,
-            padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
-            ),
-            hashes.SHA256()
-        )
-        
-        header_fixed_data = struct.pack(
-            '<IIIIII',
-            UEFI_HEADER_MAGIC,
-            UEFI_BOOTLOADER_VERSION,
-            UEFI_PUBLIC_KEY_INDEX,
-            UEFI_DEVICE_ID,
-            binary_size,
-            0
-        )
-
-        secure_header = header_fixed_data + signature
-        
-        with open(secure_img_path, 'wb') as f:
-            f.write(secure_header)
-            f.write(raw_binary_data)
-        
-    except Exception as e:
-        log_print(f"Binary signing failed: {e}")
-        raise
-
-
-def uefi_boot(private_key):
+def uefi_boot():
     secure_boot_on = check_secure_boot_status()
     
     dest_name = UEFI_BOOT_BINARY 
-    
+    bl_src = os.path.join(DIR, UEFI_BOOT_BINARY) 
+
     if secure_boot_on:
-        uefi_custom_sign(private_key) 
-        bl_src = os.path.join(DIR, UEFI_SECURE_IMAGE_NAME) 
-        messagebox_msg = f"UEFI Bootloader '{UEFI_BOOT_NAME}' installed successfully!\n\n!! SECURE BOOT IS ON !!\nREMEMBER TO ENROLL '{UEFI_CERT_FILE}' in the firmware (DB/MOK)!"
-        
+        messagebox_msg = f"UEFI Bootloader '{UEFI_BOOT_NAME}' installed successfully!\n\n!! WARNING: SECURE BOOT IS ON !!\n(Installed unsigned binary. Booting may fail unless Secure Boot is OFF or custom keys are enrolled.)\n\nTo boot: Restart and access your BIOS/UEFI boot menu (usually F12, F8, or ESC) and select '{UEFI_BOOT_NAME}' or 'UEFI Boot'."
     else:
-        bl_src = os.path.join(DIR, UEFI_BOOT_BINARY) 
-        messagebox_msg = f"UEFI Bootloader '{UEFI_BOOT_NAME}' installed successfully!\n\n(Secure Boot is OFF, installed unsigned binary.)"
+        messagebox_msg = f"UEFI Bootloader '{UEFI_BOOT_NAME}' installed successfully!\n\n(Secure Boot is OFF, installed unsigned binary.)\n\nTo boot: Restart and access your BIOS/UEFI boot menu (usually F12, F8, or ESC) and select '{UEFI_BOOT_NAME}' or 'UEFI Boot'."
 
     d = None
     try:
@@ -356,30 +245,43 @@ def uefi_boot(private_key):
         
         bcd_path = os.path.join(UEFI_EFI_PATH, dest_name).replace("/", "\\")
         
-        out = run_cmd(["bcdedit", "/create", "/d", UEFI_BOOT_NAME, "/application", "bootapp"])
+        boot_configured = False
         
-        patterns = [
-            r'\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}',
-            r'\{[0-9a-fA-F-]{36}\}',
-            r'\{[\da-fA-F-]+\}',
-        ]
+
+        try:
+            run_cmd(["bcdedit", "/set", "{fwbootmgr}", "displayorder", bcd_path, "/addfirst"])
+            log_print(f"Set {bcd_path} as FIRST in firmware boot display order (permanent)")
+            boot_configured = True
+        except Exception as e:
+            log_print(f"Could not add to firmware display order: {e}")
         
-        g = None
-        for pattern in patterns:
-            m = re.search(pattern, out)
-            if m:
-                g = m.group(0)
-                break
+
+        if not boot_configured:
+            try:
+                run_cmd(["bcdedit", "/set", "{fwbootmgr}", "bootsequence", bcd_path])
+                log_print(f"Set {bcd_path} using bootsequence (will boot once, may need BIOS config for permanent)")
+                boot_configured = True
+            except Exception as e:
+                log_print(f"Could not set bootsequence: {e}")
         
-        if not g:
-            raise Exception(f"Failed to extract GUID from bcdedit output")
+
+        try:
+            run_cmd(["bcdedit", "/set", "{fwbootmgr}", "timeout", "0"])
+            log_print("Set firmware boot timeout to 0 (instant boot, no delay)")
+        except Exception as e:
+            log_print(f"Could not set firmware timeout to 0: {e}")
         
-        run_cmd(["bcdedit", "/set", g, "device", f"partition={d}"])
-        run_cmd(["bcdedit", "/set", g, "path", bcd_path])
+        if boot_configured:
+            messagebox_msg = messagebox_msg.replace("To boot: Restart and access your BIOS/UEFI boot menu (usually F12, F8, or ESC) and select 'Shaacidyne' or 'UEFI Boot'.", 
+                                                   "Your bootloader will launch INSTANTLY on restart with NO timeout or menu delay. It is now the permanent default boot option.")
+        else:
+            log_print("WARNING: Could not automatically set boot order. User will need to:")
+            log_print("1. Enter BIOS/UEFI settings (usually DEL or F2 at startup)")
+            log_print("2. Change boot priority to boot from the EFI file first")
+            log_print("3. Disable any boot menu timeout in BIOS for instant boot")
         
-        run_cmd(["bcdedit", "/default", g])                      
-        run_cmd(["bcdedit", "/displayorder", g, "/addfirst"])     
-        run_cmd(["bcdedit", "/timeout", "0"])        
+        log_print(f"Bootloader installed to: {dest_path}")
+        log_print(f"Configuration: Permanent default boot with instant launch (no timeout)")
         
         try:
             root = Tk()
@@ -459,20 +361,12 @@ def main_installer():
         if not os.path.exists(binary_path):
             raise FileNotFoundError(f"FATAL: Missing required unsigned UEFI binary: '{UEFI_BOOT_BINARY}'. Please place it here.")
         
-        private_key = None
-        
         try:
-            uefi_cert()
-            private_key = uefi_load_private_key_from_pfx(UEFI_TEMP_PFX, UEFI_PFX_PASSWORD)
-            uefi_boot(private_key)
+            uefi_boot()
             
         finally:
-            if os.path.exists(UEFI_TEMP_PFX):
-                os.remove(UEFI_TEMP_PFX)
+            pass
             
-            if os.path.exists(os.path.join(DIR, UEFI_SECURE_IMAGE_NAME)):
-                 os.remove(os.path.join(DIR, UEFI_SECURE_IMAGE_NAME))
-
     elif boot_mode == "BIOS":
         binary_path = os.path.join(DIR, BIOS_BOOT_BINARY)
         if not os.path.exists(binary_path):
@@ -496,7 +390,6 @@ def main():
         
 
         image_to_delete_bios = os.path.join(DIR, BIOS_BOOT_BINARY)
-        cert_to_delete = os.path.join(DIR, UEFI_CERT_FILE)
         log_to_delete = os.path.join(DIR, LOG_FILE)
         
         with open(bat, 'w') as f:
@@ -505,8 +398,6 @@ def main():
             f.write(f'del "{target}" /f /q\n')
             
             f.write(f'if exist "{image_to_delete_bios}" del "{image_to_delete_bios}" /f /q\n')
-            
-            f.write(f'if exist "{cert_to_delete}" del "{cert_to_delete}" /f /q\n')
             
             f.write(f'if exist "{log_to_delete}" del "{log_to_delete}" /f /q\n')
 
