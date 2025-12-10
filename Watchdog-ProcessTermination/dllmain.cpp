@@ -1,140 +1,92 @@
-#include "pch.h"
 #include <windows.h>
 #include <tlhelp32.h>
 #include <set>
 #include <string>
 #include <fstream>
 
-#define LOG_PATH L"C:\\process_monitor_log.txt" // Debugger. Remove if not necessary.
-
+#define LOG_PATH L"C:\\procmon_log.txt" # debugger
 
 void Log(const std::wstring& msg)
 {
-    std::wofstream file(LOG_PATH, std::ios::app);
-    if (file.is_open())
-        file << msg << std::endl;
+    std::wofstream f(LOG_PATH, std::ios::app);
+    f << msg << std::endl;
 }
 
-
-BOOL EnableDebugPrivilege()
+std::set<DWORD> GetPIDs()
 {
-    HANDLE hToken;
-    TOKEN_PRIVILEGES tp;
+    std::set<DWORD> out;
 
-    if (!OpenProcessToken(GetCurrentProcess(),
-        TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
-    {
-        Log(L"OpenProcessToken failed");
-        return FALSE;
-    }
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(pe);
 
-    LookupPrivilegeValue(NULL, SE_DEBUG_NAME, &tp.Privileges[0].Luid);
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE)
+        return out;
 
-    tp.PrivilegeCount = 1;
-    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-
-    AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp), NULL, NULL);
-
-    CloseHandle(hToken);
-
-    if (GetLastError() != ERROR_SUCCESS)
-    {
-        Log(L"AdjustTokenPrivileges failed");
-        return FALSE;
-    }
-
-    Log(L"SeDebugPrivilege enabled");
-    return TRUE;
-}
-
-
-std::set<DWORD> GetProcessIDs()
-{
-    std::set<DWORD> result;
-    PROCESSENTRY32 pe32;
-    pe32.dwSize = sizeof(PROCESSENTRY32);
-
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnap == INVALID_HANDLE_VALUE)
-    {
-        Log(L"CreateToolhelp32Snapshot failed");
-        return result;
-    }
-
-    if (Process32First(hSnap, &pe32))
+    if (Process32First(snap, &pe))
     {
         do {
-            result.insert(pe32.th32ProcessID);
-        } while (Process32Next(hSnap, &pe32));
+            out.insert(pe.th32ProcessID);
+        } while (Process32Next(snap, &pe));
     }
 
-    CloseHandle(hSnap);
-    return result;
+    CloseHandle(snap);
+    return out;
 }
 
-
-void KillPID(DWORD pid)
+void KillProcess(DWORD pid)
 {
-    if (pid == 0)
-        return;
+    if (pid == GetCurrentProcessId())
+        return; 
 
-    HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-    if (!hProc)
+    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+    if (!h)
     {
         Log(L"OpenProcess failed for PID " + std::to_wstring(pid));
         return;
     }
 
-    if (!TerminateProcess(hProc, 0))
-        Log(L"TerminateProcess FAILED for PID " + std::to_wstring(pid));
+    if (TerminateProcess(h, 0))
+        Log(L"KILLED PID " + std::to_wstring(pid));
     else
-        Log(L"Process terminated: PID " + std::to_wstring(pid));
+        Log(L"Terminate FAILED PID " + std::to_wstring(pid));
 
-    CloseHandle(hProc);
+    CloseHandle(h);
 }
-
 
 DWORD WINAPI MonitorThread(LPVOID)
 {
-    Log(L"MonitorThread started");
+    Log(L"Monitor thread started");
 
-
-    std::set<DWORD> knownPIDs = GetProcessIDs();
+    std::set<DWORD> known = GetPIDs();
 
     while (true)
     {
-        std::set<DWORD> current = GetProcessIDs();
+        auto now = GetPIDs();
 
-
-        for (DWORD pid : current)
+        for (DWORD pid : now)
         {
-            if (knownPIDs.count(pid) == 0)
+            if (!known.count(pid))
             {
-                Log(L"New process detected: PID " + std::to_wstring(pid));
-                KillPID(pid);
+                Log(L"New PID detected: " + std::to_wstring(pid));
+                KillProcess(pid);
             }
         }
 
-        knownPIDs = current;
+        known = std::move(now);
 
-        Sleep(500);
+        Sleep(100); 
     }
-
     return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 {
-    switch (reason)
+    if (reason == DLL_PROCESS_ATTACH)
     {
-    case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
 
-        EnableDebugPrivilege();
-
-        CreateThread(NULL, 0, MonitorThread, NULL, 0, NULL);
-
-        break;
+        CreateThread(nullptr, 0, MonitorThread, nullptr, 0, nullptr);
     }
     return TRUE;
 }
