@@ -27,6 +27,7 @@ The code has four critical stages of PE loading:
     * Finally, it locates the new address of the program's main entry point and transfers control to it, beginning execution of the reassembled module.
 
 ---
+**DISCLAIMER** - Misuse or improper implementation of these functions can lead to system instability, crashes, or unpredictable behavior. Use at your own risk. The author is not responsible for any damage, loss of data, or legal consequences resulting from the misuse of this material. 
 
 ## Contacts
 
