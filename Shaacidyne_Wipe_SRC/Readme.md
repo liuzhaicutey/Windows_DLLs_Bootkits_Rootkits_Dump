@@ -13,4 +13,4 @@ A Windows bootloader wiper written in python, ASM, and C.
 The tool is a proof-of-concept and entirely used for educational purposes. It should not be used against machines you do not have permissions to test. The author is not responsible for any misuse or any damage that this tool may cause. 
 
 # Contacts #
-https://t.me/shaacidyne
+https://t.me/Shaacidyne
