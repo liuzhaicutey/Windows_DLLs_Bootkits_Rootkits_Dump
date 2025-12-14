@@ -36,7 +36,7 @@ The code follows four key stages to load and execute a PE file in memory:
    └── resource.rc
        └── RCDATA
            └── IDR_CUSTOM1  <-- rename to 101
--**Compile**.
+  - **Compile**.
 
 ---
 
