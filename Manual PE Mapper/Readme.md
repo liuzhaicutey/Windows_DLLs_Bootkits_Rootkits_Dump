@@ -1,34 +1,50 @@
 # Manual PE Mapper
 
-A **Custom In-Memory PE File Loader**, or assembler utility DLL designed to manually map a running executable into a **new, clean block of memory** within the current process and prepare it for execution.
-A classic technique for **reflective DLL injection**, **packing/unpacking**, **obfuscation**, and building custom **anti-debugging** mechanisms. Load directly to your application or inject using custom injectors.
+A **custom in-memory PE file loader**, this utility is designed to map a **PE (Portable Executable)** file into memory, modify the necessary data structures, and prepare it for execution. This technique is commonly used in scenarios such as **reflective DLL injection**, **packing and unpacking executables**, **obfuscation**, and **custom anti-debugging** mechanisms. You can use it to directly load a PE file into your application or inject it into a target process.
 
 ---
 
-## Key Methods & Operations
+## Key Operations & Workflow
 
-The code has four critical stages of PE loading:
+The code follows four key stages to load and execute a PE file in memory:
 
-1.  **Memory Allocation & Copying:**
-    * Uses `VirtualAlloc` to allocate the required memory at the image's preferred base address.
-    * Copies all necessary data—the headers and all sections (like `.text`, `.data`)—from the original module to the new memory location using `memcpy`.
+### 1. Memory Allocation & Copying:
+   - Uses **`VirtualAlloc`** to allocate memory at the PE file's preferred base address (or a new base if ASLR is involved).
+   - Copies the headers, sections (e.g., `.text`, `.data`), and other necessary parts of the PE file into the newly allocated memory using **`memcpy`**.
 
-2.  **Import Resolution (Linking):**
-    * The **`ProcessImports`** function parses the Import Directory to find external DLLs and functions.
-    * It calls `LoadLibraryA` and `GetProcAddress` to dynamically find the actual memory addresses of every external function and writes them into the new image's Import Address Table (IAT). 
+### 2. Import Resolution (Linking):
+   - The **`ProcessImports`** function parses the PE file's Import Directory to find external dependencies (DLLs and functions).
+   - It uses **`LoadLibraryA`** to load the required DLLs and **`GetProcAddress`** to dynamically resolve function addresses. These addresses are written into the new image’s Import Address Table (IAT), allowing the PE file to access external functions at runtime.
 
-3.  **Relocation Fix-up:**
-    * If the new image base address is different from the preferred address (due to ASLR), all internal absolute pointers are incorrect.
-    * The **`ProcessRelocations`** function parses the **IMAGE\_BASE\_RELOCATION** directory and adds the memory delta (the base address difference) to every hardcoded pointer, ensuring all internal references are valid.
+### 3. Relocation Fix-up:
+   - If the PE file is loaded at a different base address than the preferred one (due to ASLR), all absolute addresses and pointers inside the file need to be updated.
+   - The **`ProcessRelocations`** function processes the **IMAGE_BASE_RELOCATION** directory and adjusts the pointers by adding the base address difference (delta), ensuring the internal references are valid.
 
-4.  **Execution Preparation:**
-    * It uses `VirtualProtect` to set the necessary memory permissions (Read, Write, Execute) on the newly copied code and data sections.
-    * It executes any required **TLS (Thread Local Storage) callbacks**.
-    * Finally, it locates the new address of the program's main entry point and transfers control to it, beginning execution of the reassembled module.
+### 4. Execution Preparation:
+   - **`VirtualProtect`** is used to set appropriate memory protections (e.g., **Read**, **Write**, **Execute**) on the newly allocated memory, ensuring it’s ready for execution.
+   - It handles any **Thread Local Storage (TLS) callbacks** that may need to be executed during initialization.
+   - Finally, the tool identifies the new entry point of the program and transfers control to it, initiating the execution of the reassembled module.
 
 ---
-**DISCLAIMER** - Misuse or improper implementation of these functions can lead to system instability, crashes, or unpredictable behavior. Use at your own risk. The author is not responsible for any damage, loss of data, or legal consequences resulting from the misuse of this material. 
+
+## Important Considerations
+
+- **ASLR (Address Space Layout Randomization):** If the PE file is being relocated due to ASLR, make sure to account for this when mapping the image and fixing relocations.
+- **Error Handling:** The code assumes that operations like `VirtualAlloc`, `memcpy`, and `VirtualProtect` succeed. You should implement robust error handling to ensure the program handles failure cases gracefully.
+- **TLS Callbacks:** The `ExecuteTLSCallbacks` function is responsible for running any initialization code defined in the TLS section of the PE file. These are crucial for DLLs but may not be used in all PE files.
+- **Import Address Table (IAT):** Be sure to resolve all dynamic imports correctly, including **delayed imports**, which may require special handling.
+
+---
+
+## DISCLAIMER
+
+The techniques outlined in this repository can be useful for educational purposes, reverse engineering, and legitimate software development. However, **misuse of these techniques for malicious purposes**, such as unauthorized code injection, tampering with system processes, or evading security mechanisms, is illegal and unethical. Always ensure that you have the proper permissions and comply with local laws and regulations when using this code.
+
+The author is not responsible for any damage, data loss, or legal consequences arising from the use or misuse of this material.
+
+---
 
 ## Contacts
 
-https://t.me/Shaacidyne
+For further inquiries, you can reach the author at:  
+[Telegram: Shaacidyne](https://t.me/Shaacidyne)
